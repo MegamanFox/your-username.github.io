@@ -79,9 +79,9 @@ async function fetchPriceOverview(marketHashName, gameId, currencyId, attempt = 
   })
 
   if (resp.status === 429 || resp.status === 503) {
-    if (attempt < 3) {
-      const backoff = 5000 * attempt
-      console.warn(`Got ${resp.status}, retrying in ${backoff}ms (attempt ${attempt + 1}/3)...`)
+    if (attempt < 4) {
+      const backoff = 8000 * attempt
+      console.warn(`Got ${resp.status}, retrying in ${backoff}ms (attempt ${attempt + 1}/4)...`)
       await sleep(backoff)
       return fetchPriceOverview(marketHashName, gameId, currencyId, attempt + 1)
     }
@@ -134,6 +134,7 @@ async function main() {
   let requestCount = 0
   let usdPrice = null
   let sawFailure = false
+  let wasRateLimited = false
 
   const runOrder = [['USD', 1], ...toFetch.map((name) => [name, CURRENCIES[name]])]
 
@@ -156,6 +157,7 @@ async function main() {
         console.error(`Response started with: ${JSON.stringify(result.snippet)}`)
       }
       if (result.reason === 'rate-limited') {
+        wasRateLimited = true
         console.warn('Stopping this run after repeated rate limiting.')
         break
       }
@@ -207,8 +209,17 @@ async function main() {
 
   console.log('Done.')
 
-  // Fail the workflow run visibly if nothing at all succeeded, so it's easy
-  // to notice in the Actions tab rather than silently committing no changes.
+  // Steam rate-limiting is a transient, external condition tied to whichever
+  // shared runner IP this job happened to land on — not a bug in this script.
+  // The next scheduled run gets a fresh runner (likely a different IP), so
+  // don't mark the workflow as failed for this; just note it clearly in logs.
+  if (wasRateLimited && Object.keys(rates).length === 0) {
+    console.warn('Steam rate-limited this run before any price was fetched. Skipping — the next scheduled run will try again on a fresh runner.')
+    return
+  }
+
+  // A genuinely unexpected failure (not rate limiting) with nothing updated
+  // is worth surfacing as a failed run, since it likely needs attention.
   if (sawFailure && Object.keys(rates).length === 0) {
     console.error('No currencies were successfully updated this run.')
     process.exitCode = 1
