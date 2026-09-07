@@ -2,10 +2,16 @@
 // derives an exchange rate against USD for each, and writes the result to
 // data/rates.json (latest) and data/history.json (rolling history).
 //
-// Ported from the archived "sert" project (https://github.com/somespecialone/sert),
-// adapted to run as a plain Node script from GitHub Actions instead of a
-// Cloudflare Worker, and to write to JSON files in the repo instead of
-// Cloudflare KV. See README.md for the notable differences.
+// Uses Steam's public `priceoverview` endpoint — the same lightweight,
+// widely-used endpoint that most third-party Steam price trackers and
+// browser extensions hit — rather than scraping the full listing/render
+// page. It's simpler (one item price per request, no listing-id bookkeeping)
+// and, in practice, far less likely to be challenged as bot traffic than the
+// heavier render endpoint.
+//
+// Loosely based on the archived "sert" project
+// (https://github.com/somespecialone/sert); see README.md for how this
+// differs from the original.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -19,7 +25,6 @@ const RATES_FILE = path.join(DATA_DIR, 'rates.json')
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json')
 
 const round = (n) => Math.round(n * 1e4) / 1e4
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function readJson(file) {
@@ -37,23 +42,73 @@ function isFresh(updatedTs, minMinutes) {
   return ageMinutes < minMinutes
 }
 
-async function fetchListingPage(marketHashName, gameId, currencyId) {
-  const listingURL = `https://steamcommunity.com/market/listings/${gameId}/${encodeURIComponent(marketHashName)}`
+// Steam formats prices as locale strings ("$0.03", "0,03€", "R$ 0,03", ...).
+// Strip everything but digits/separators, then treat whichever of ',' or '.'
+// appears LAST as the decimal separator (the other, if present, is a
+// thousands separator). Reliable for the small values items like this sell for.
+function parsePrice(str) {
+  if (!str) return null
+  const cleaned = str.replace(/[^\d,.\-]/g, '')
+  const lastComma = cleaned.lastIndexOf(',')
+  const lastDot = cleaned.lastIndexOf('.')
+  const decimalIdx = Math.max(lastComma, lastDot)
+  if (decimalIdx === -1) return parseFloat(cleaned) || null
+  const intPart = cleaned.slice(0, decimalIdx).replace(/[,.]/g, '')
+  const fracPart = cleaned.slice(decimalIdx + 1)
+  const value = parseFloat(`${intPart || '0'}.${fracPart}`)
+  return Number.isFinite(value) ? value : null
+}
+
+async function fetchPriceOverview(marketHashName, gameId, currencyId, attempt = 1) {
   const query = new URLSearchParams({
-    start: '0',
-    count: '10',
-    country: 'US',
-    language: 'english',
-    currency: currencyId.toString(),
-    filter: ''
+    appid: gameId,
+    market_hash_name: marketHashName,
+    currency: currencyId.toString()
   })
+  const url = `https://steamcommunity.com/market/priceoverview/?${query}`
 
-  const resp = await fetch(`${listingURL}/render/?${query}`, {
+  const resp = await fetch(url, {
     method: 'GET',
-    headers: { referer: listingURL, 'user-agent': 'Mozilla/5.0 (sert-remake rate tracker)' }
+    headers: {
+      accept: 'application/json, text/javascript, */*; q=0.01',
+      'accept-language': 'en-US,en;q=0.9',
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      referer: `https://steamcommunity.com/market/listings/${gameId}/${encodeURIComponent(marketHashName)}`
+    }
   })
 
-  return resp
+  if (resp.status === 429 || resp.status === 503) {
+    if (attempt < 3) {
+      const backoff = 5000 * attempt
+      console.warn(`Got ${resp.status}, retrying in ${backoff}ms (attempt ${attempt + 1}/3)...`)
+      await sleep(backoff)
+      return fetchPriceOverview(marketHashName, gameId, currencyId, attempt + 1)
+    }
+    return { ok: false, status: resp.status, reason: 'rate-limited' }
+  }
+
+  const contentType = resp.headers.get('content-type') || ''
+  const rawText = await resp.text()
+
+  if (!resp.ok || !contentType.includes('json')) {
+    return {
+      ok: false,
+      status: resp.status,
+      reason: 'non-json-response',
+      snippet: rawText.slice(0, 300)
+    }
+  }
+
+  try {
+    const json = JSON.parse(rawText)
+    if (!json.success) {
+      return { ok: false, status: resp.status, reason: 'success-false', snippet: rawText.slice(0, 300) }
+    }
+    return { ok: true, json }
+  } catch {
+    return { ok: false, status: resp.status, reason: 'invalid-json', snippet: rawText.slice(0, 300) }
+  }
 }
 
 async function main() {
@@ -64,8 +119,6 @@ async function main() {
     CONFIG
 
   const wanted = wantedNames.filter((name) => name in CURRENCIES)
-
-  // Skip currencies that were refreshed very recently (e.g. manual re-run).
   const toFetch = wanted.filter((name) => {
     const latest = history[name]?.[0]
     return !isFresh(latest?.[1], minUpdateIntervalMinutes)
@@ -79,12 +132,9 @@ async function main() {
   console.log(`Tracking "${itemMarketName}" (app ${steamGameId}). Updating: ${toFetch.join(', ')}`)
 
   let requestCount = 0
-  let referenceListingId = null
-  let originalToUSDRate = 1
+  let usdPrice = null
+  let sawFailure = false
 
-  // Always fetch USD first, both as the baseline and to pick a reference
-  // listing whose id we reuse for every other currency request in this run,
-  // so we're comparing the price of the *same* listing across currencies.
   const runOrder = [['USD', 1], ...toFetch.map((name) => [name, CURRENCIES[name]])]
 
   for (const [currencyName, currencyId] of runOrder) {
@@ -93,48 +143,48 @@ async function main() {
       break
     }
 
-    const resp = await fetchListingPage(itemMarketName, steamGameId, currencyId)
+    // Be polite to Steam before every request, including the first.
+    await sleep(1500 + Math.random() * 1000)
+
+    const result = await fetchPriceOverview(itemMarketName, steamGameId, currencyId)
     requestCount++
 
-    if (resp.status === 429) {
-      console.warn('Hit Steam rate limit (429); stopping this run.')
-      break
-    }
-
-    if (!resp.ok) {
-      console.error(`Request for ${currencyName} failed: ${resp.status} ${resp.statusText}`)
+    if (!result.ok) {
+      sawFailure = true
+      console.error(`Request for ${currencyName} failed (${result.reason}, status ${result.status}).`)
+      if (result.snippet) {
+        console.error(`Response started with: ${JSON.stringify(result.snippet)}`)
+      }
+      if (result.reason === 'rate-limited') {
+        console.warn('Stopping this run after repeated rate limiting.')
+        break
+      }
       continue
     }
 
-    const body = await resp.json()
-    const listingInfo = body?.listinginfo
-    if (!listingInfo || !Object.keys(listingInfo).length) {
-      console.error(`No active listings returned for ${currencyName}.`)
+    const price = parsePrice(result.json.lowest_price || result.json.median_price)
+    if (price === null) {
+      console.error(`Could not parse a price for ${currencyName} from`, result.json)
       continue
-    }
-
-    // Establish the reference listing id from the first (USD) response, then
-    // reuse it. Fall back to whatever listing is available if it disappears
-    // (e.g. bought) between requests.
-    let listingData = referenceListingId ? listingInfo[referenceListingId] : undefined
-    if (!listingData) {
-      const [fallbackId, fallbackData] = Object.entries(listingInfo)[0]
-      if (!referenceListingId) referenceListingId = fallbackId
-      listingData = fallbackData
     }
 
     const updated = Math.round(Date.now() / 1000)
 
     if (currencyId === 1) {
-      originalToUSDRate = round(listingData.price / listingData.converted_price)
+      usdPrice = price
+      console.log(`USD reference price: $${price}`)
       continue
     }
 
-    const rate = round((listingData.converted_price / listingData.price) * originalToUSDRate)
+    if (usdPrice === null) {
+      console.error(`Skipping ${currencyName}: no USD reference price for this run.`)
+      continue
+    }
+
+    const rate = round(price / usdPrice)
     const previous = history[currencyName]?.[0]?.[0]
 
-    // Sanity check: Steam occasionally returns corrupt converted prices.
-    // A currency is very unlikely to move >10x in one update cycle.
+    // Sanity check: a currency is very unlikely to move >10x in one cycle.
     if (previous && (previous / rate > 10 || rate / previous > 10)) {
       console.warn(`Ignoring implausible rate for ${currencyName}: ${previous} -> ${rate}`)
       continue
@@ -144,25 +194,25 @@ async function main() {
     currentHistory.unshift([rate, updated])
     history[currencyName] = currentHistory.slice(0, historySize)
 
-    console.log(`${currencyName}: ${rate} (1 USD)`)
-
-    // Be polite to Steam between requests.
-    await sleep(1500)
+    console.log(`${currencyName}: ${rate} per 1 USD`)
   }
 
-  // Sort currencies by their Steam currency id for stable output.
   const sortedHistory = Object.fromEntries(
     Object.entries(history).sort(([a], [b]) => (CURRENCIES[a] || 0) - (CURRENCIES[b] || 0))
   )
-
-  const rates = Object.fromEntries(
-    Object.entries(sortedHistory).map(([name, entries]) => [name, entries[0]])
-  )
+  const rates = Object.fromEntries(Object.entries(sortedHistory).map(([name, entries]) => [name, entries[0]]))
 
   await writeFile(HISTORY_FILE, JSON.stringify(sortedHistory, null, 2) + '\n')
   await writeFile(RATES_FILE, JSON.stringify(rates, null, 2) + '\n')
 
   console.log('Done.')
+
+  // Fail the workflow run visibly if nothing at all succeeded, so it's easy
+  // to notice in the Actions tab rather than silently committing no changes.
+  if (sawFailure && Object.keys(rates).length === 0) {
+    console.error('No currencies were successfully updated this run.')
+    process.exitCode = 1
+  }
 }
 
 main().catch((err) => {
