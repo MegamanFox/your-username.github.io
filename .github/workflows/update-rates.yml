@@ -1,0 +1,34 @@
+name: Update Steam exchange rates
+
+on:
+  schedule:
+    # Twice an hour, at :09 and :39. GitHub may delay scheduled runs slightly
+    # during high load — this is a soft guarantee, not exact.
+    - cron: "9,39 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-rates
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch latest rates
+        run: node scripts/update-rates.mjs
+
+      - name: Commit updated data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update steam exchange rates"
+          file_pattern: "data/*.json"

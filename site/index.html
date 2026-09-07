@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sert · Steam Exchange Rate Tracker</title>
+  <meta name="description" content="Live currency exchange rates derived from Steam Community Market prices, updated automatically." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <div class="masthead__row">
+      <span class="wordmark">sert</span>
+      <span class="masthead__meta" id="updated-meta">checking last update…</span>
+    </div>
+    <h1 class="headline">The Steam Community Market,<br />priced in your currency.</h1>
+    <p class="subhead" id="item-subhead">
+      Tracking the price of a <strong>Fracture Case</strong> (CS2) on the Steam Community
+      Market, and using it to back out live exchange rates against the US Dollar.
+    </p>
+  </header>
+
+  <section class="ticker" aria-label="Current exchange rates">
+    <div class="ticker__track" id="ticker-track">
+      <span class="ticker__loading">fetching rates…</span>
+    </div>
+  </section>
+
+  <main>
+    <section class="panel converter" aria-labelledby="convert-heading">
+      <h2 id="convert-heading">Convert</h2>
+      <form class="converter__form" id="converter-form">
+        <div class="field">
+          <label for="amount">Amount</label>
+          <input type="text" inputmode="decimal" id="amount" name="amount" value="1" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="from-currency">From</label>
+          <select id="from-currency" name="from"></select>
+        </div>
+        <div class="converter__arrow" aria-hidden="true">&rarr;</div>
+        <div class="field field--result">
+          <label for="result">Result</label>
+          <output id="result" for="amount from-currency to-currency">–</output>
+        </div>
+        <div class="field">
+          <label for="to-currency">To</label>
+          <select id="to-currency" name="to"></select>
+        </div>
+      </form>
+      <p class="converter__note" id="converter-note"></p>
+    </section>
+
+    <section class="panel rates" aria-labelledby="rates-heading">
+      <div class="rates__head">
+        <h2 id="rates-heading">Rates</h2>
+        <span class="rates__hint">against 1 USD</span>
+      </div>
+      <div class="rates__table" id="rates-table">
+        <p class="rates__empty">No data yet — the tracker updates on its own schedule. Check back soon.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <p>
+      Prices sourced from the Steam Community Market. Refreshed automatically by a scheduled
+      GitHub Actions job — see <a href="https://github.com/somespecialone/sert" target="_blank" rel="noopener">the original sert project</a>
+      this tracker is based on.
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

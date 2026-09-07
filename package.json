@@ -1,0 +1,13 @@
+{
+  "name": "sert-remake",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Steam Community Market exchange rate tracker — GitHub Actions + GitHub Pages remake of somespecialone/sert",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "update-rates": "node scripts/update-rates.mjs"
+  }
+}
