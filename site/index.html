@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sert · Steam Exchange Rate Tracker</title>
-  <meta name="description" content="Live currency exchange rates derived from Steam Community Market prices, updated automatically." />
+  <title>Sert · Exchange Rate Tracker</title>
+  <meta name="description" content="Live USD exchange rates, updated automatically from real central bank data." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -18,10 +18,11 @@
       <span class="wordmark">sert</span>
       <span class="masthead__meta" id="updated-meta">checking last update…</span>
     </div>
-    <h1 class="headline">The Steam Community Market,<br />priced in your currency.</h1>
+    <h1 class="headline">Real exchange rates,<br />tracked automatically.</h1>
     <p class="subhead" id="item-subhead">
-      Tracking the price of a <strong>Mann Co. Crate Supply Key</strong> (TF2) on the Steam Community
-      Market, and using it to back out live exchange rates against the US Dollar.
+      Live USD rates for a handful of currencies, refreshed daily from the
+      European Central Bank and partner central banks via
+      <a href="https://frankfurter.dev" target="_blank" rel="noopener">Frankfurter</a>.
     </p>
   </header>
 
@@ -69,9 +70,10 @@
 
   <footer class="colophon">
     <p>
-      Prices sourced from the Steam Community Market. Refreshed automatically by a scheduled
-      GitHub Actions job — see <a href="https://github.com/somespecialone/sert" target="_blank" rel="noopener">the original sert project</a>
-      this tracker is based on.
+      Rates sourced from <a href="https://frankfurter.dev" target="_blank" rel="noopener">Frankfurter</a>
+      (European Central Bank + partner central bank data). Refreshed automatically by a scheduled
+      GitHub Actions job — remade from the archived
+      <a href="https://github.com/somespecialone/sert" target="_blank" rel="noopener">sert project</a>.
     </p>
   </footer>
 
