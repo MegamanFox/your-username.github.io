@@ -7,6 +7,14 @@ on:
       - "site/**"
       - "data/**"
       - ".github/workflows/pages.yml"
+  # A push made with the default GITHUB_TOKEN (as the fallback update
+  # workflow's commit step uses) does NOT trigger other workflows' `push`
+  # events — that's a GitHub anti-recursion safeguard. This trigger covers
+  # that case: it fires once the update workflow finishes, regardless of
+  # what token it pushed with.
+  workflow_run:
+    workflows: ["Update Steam exchange rates (manual fallback)"]
+    types: [completed]
   workflow_dispatch: {}
 
 permissions:
@@ -20,6 +28,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
