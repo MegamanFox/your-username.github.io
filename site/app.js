@@ -3,7 +3,18 @@ const state = {
   history: {} // { CODE: [[rate, ts], ...] }
 };
 
-const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 });
+// Rates near 1.0 (EUR, GBP, ...) need extra decimal places to be meaningful;
+// larger-magnitude rates (RUB, KZT, JPY, ...) read better at the usual 2
+// decimals everyone's used to from prices. Match that convention instead of
+// showing every currency at the same fixed precision.
+const rateFmtPrecise = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+const rateFmtStandard = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtRate(value) {
+  return (Math.abs(value) < 1 ? rateFmtPrecise : rateFmtStandard).format(value);
+}
+
+// Converted money amounts always read as ordinary prices — 2 decimals, full stop.
+const moneyFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 async function loadData() {
   const [ratesRes, historyRes] = await Promise.all([
@@ -45,7 +56,7 @@ function renderTicker() {
   }
 
   const items = codes
-    .map((code) => `<span class="ticker__item">1 USD = <b>${fmt.format(state.rates[code][0])}</b> ${code}</span>`)
+    .map((code) => `<span class="ticker__item">1 USD = <b>${fmtRate(state.rates[code][0])}</b> ${code}</span>`)
     .join("");
 
   // Duplicate the sequence so the scrolling loop (translateX(-50%)) is seamless.
@@ -94,8 +105,8 @@ function renderConversion() {
     return;
   }
 
-  result.textContent = `${fmt.format(converted)} ${to}`;
-  note.textContent = `1 ${from} ≈ ${fmt.format(convert(1, from, to))} ${to}, derived from the tracked item's Steam Market price.`;
+  result.textContent = `${moneyFmt.format(converted)} ${to}`;
+  note.textContent = `1 ${from} ≈ ${fmtRate(convert(1, from, to))} ${to}, derived from the tracked item's Steam Market price.`;
 }
 
 function sparklinePath(points) {
@@ -154,7 +165,7 @@ function renderRatesTable() {
         <div class="rate-row">
           <span class="rate-row__code">${code}</span>
           <span class="rate-row__spark">${sparkSvg}</span>
-          <span class="rate-row__value">${fmt.format(latest)}</span>
+          <span class="rate-row__value">${fmtRate(latest)}</span>
           <span class="rate-row__delta ${deltaClass}">${deltaText}</span>
         </div>`;
     })
